@@ -1,0 +1,143 @@
+// Krevia — Sprint 1 data model
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PlatformRole {
+  RESIDENT
+  PLATFORM_ADMIN
+}
+
+enum ClientType {
+  WEB
+  MOBILE
+}
+
+enum SocietyRoleType {
+  ADMIN
+  GUARD
+}
+
+enum OccupancyType {
+  OWNER
+  TENANT
+}
+
+enum MembershipStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model User {
+  id           String       @id @default(uuid()) @db.Uuid
+  /// E.164, e.g. +919876543210
+  phone        String       @unique @db.VarChar(16)
+  email        String?      @unique @db.VarChar(254)
+  fullName     String       @db.VarChar(80)
+  passwordHash String       @db.VarChar(255)
+  platformRole PlatformRole @default(RESIDENT)
+  createdAt    DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime     @updatedAt @db.Timestamptz(3)
+
+  sessions           Session[]
+  societyRoles       SocietyRole[]
+  membershipRequests MembershipRequest[] @relation("Applicant")
+  reviewedRequests   MembershipRequest[] @relation("Reviewer")
+}
+
+model Session {
+  id         String     @id @default(uuid()) @db.Uuid
+  userId     String     @db.Uuid
+  /// SHA-256 hex digest of the opaque token. The raw token is never stored.
+  tokenHash  String     @unique @db.Char(64)
+  clientType ClientType
+  userAgent  String?    @db.VarChar(255)
+  expiresAt  DateTime   @db.Timestamptz(3)
+  revokedAt  DateTime?  @db.Timestamptz(3)
+  lastUsedAt DateTime   @default(now()) @db.Timestamptz(3)
+  createdAt  DateTime   @default(now()) @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Society {
+  id          String   @id @default(uuid()) @db.Uuid
+  slug        String   @unique @db.VarChar(120)
+  name        String   @db.VarChar(120)
+  addressLine String   @db.VarChar(200)
+  city        String   @db.VarChar(80)
+  state       String   @db.VarChar(80)
+  pincode     String   @db.Char(6)
+  /// Tower / block labels residents can choose from.
+  towers      String[]
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  units              Unit[]
+  roles              SocietyRole[]
+  membershipRequests MembershipRequest[]
+
+  @@index([name])
+  @@index([city])
+}
+
+model Unit {
+  id        String   @id @default(uuid()) @db.Uuid
+  societyId String   @db.Uuid
+  tower     String   @db.VarChar(20)
+  number    String   @db.VarChar(10)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  society            Society             @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  membershipRequests MembershipRequest[]
+
+  @@unique([societyId, tower, number])
+}
+
+model SocietyRole {
+  id        String          @id @default(uuid()) @db.Uuid
+  userId    String          @db.Uuid
+  societyId String          @db.Uuid
+  role      SocietyRoleType
+  createdAt DateTime        @default(now()) @db.Timestamptz(3)
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  society Society @relation(fields: [societyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, societyId])
+  @@index([societyId])
+}
+
+/// A partial unique index (see migration) allows at most one PENDING or
+/// APPROVED request per user.
+model MembershipRequest {
+  id           String           @id @default(uuid()) @db.Uuid
+  userId       String           @db.Uuid
+  societyId    String           @db.Uuid
+  unitId       String           @db.Uuid
+  occupancy    OccupancyType
+  status       MembershipStatus @default(PENDING)
+  reviewNote   String?          @db.VarChar(280)
+  reviewedById String?          @db.Uuid
+  reviewedAt   DateTime?        @db.Timestamptz(3)
+  createdAt    DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime         @updatedAt @db.Timestamptz(3)
+
+  user       User    @relation("Applicant", fields: [userId], references: [id], onDelete: Cascade)
+  society    Society @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  unit       Unit    @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  reviewedBy User?   @relation("Reviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([societyId, status])
+}

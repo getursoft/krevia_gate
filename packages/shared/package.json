@@ -1,0 +1,24 @@
+{
+  "name": "@krevia/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared Krevia API contract: validation schemas, DTO types, brand tokens and API client.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src",
+    "test": "jest"
+  },
+  "dependencies": {
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.4.5",
+    "typescript": "5.9.3"
+  }
+}

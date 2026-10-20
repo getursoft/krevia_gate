@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Lint, typecheck, test and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    services:
+      # Isolated, throwaway PostgreSQL. CI never touches developer databases.
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: krevia
+          POSTGRES_PASSWORD: krevia-ci-only
+          POSTGRES_DB: krevia_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U krevia"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      CI: 'true'
+      NEXT_TELEMETRY_DISABLED: '1'
+      # Test-only credentials for the service container above (not a secret).
+      PGPASSWORD: krevia-ci-only
+      DATABASE_URL: postgresql://krevia:krevia-ci-only@localhost:5432/krevia_test
+      E2E_DATABASE_URL: postgresql://krevia:krevia-ci-only@localhost:5432/krevia_e2e_test
+      # Playwright uses its bundled Chromium in CI (locally it defaults to installed Chrome).
+      PW_CHANNEL: bundled
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm (version from package.json "packageManager")
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js (version from .nvmrc)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Create e2e database
+        run: psql -h localhost -U krevia -d krevia_test -c "CREATE DATABASE krevia_e2e_test"
+
+      - name: Build shared package
+        run: pnpm build:shared
+
+      - name: Lint
+        id: lint
+        run: pnpm lint
+
+      - name: Typecheck
+        id: typecheck
+        run: pnpm typecheck
+
+      - name: Shared tests
+        id: test_shared
+        run: pnpm test:shared --ci
+
+      - name: API unit + integration tests (PostgreSQL)
+        id: test_api
+        run: pnpm test:api --ci
+
+      - name: Web unit tests
+        id: test_web_unit
+        run: pnpm test:web:unit --ci
+
+      - name: Mobile unit tests
+        id: test_mobile
+        run: pnpm test:mobile --ci
+
+      - name: Build web app
+        id: build_web
+        run: pnpm --filter @krevia/web build
+
+      - name: Install Playwright Chromium
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+
+      - name: Web end-to-end tests (Playwright)
+        id: test_e2e
+        run: pnpm test:e2e
+
+      - name: Android JS bundle export
+        id: android_export
+        run: pnpm export:android
+
+      - name: Upload Playwright report
+        if: failure() || steps.test_e2e.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Krevia CI"
+            echo "| Check | Result |"
+            echo "|---|---|"
+            echo "| Lint | ${{ steps.lint.outcome }} |"
+            echo "| Typecheck | ${{ steps.typecheck.outcome }} |"
+            echo "| Shared tests | ${{ steps.test_shared.outcome }} |"
+            echo "| API tests | ${{ steps.test_api.outcome }} |"
+            echo "| Web unit tests | ${{ steps.test_web_unit.outcome }} |"
+            echo "| Mobile tests | ${{ steps.test_mobile.outcome }} |"
+            echo "| Web build | ${{ steps.build_web.outcome }} |"
+            echo "| Web e2e | ${{ steps.test_e2e.outcome }} |"
+            echo "| Android JS export | ${{ steps.android_export.outcome }} |"
+            echo ""
+            echo "Android native build is not run in CI (requires JDK + Android SDK; see README)."
+          } >> "$GITHUB_STEP_SUMMARY"

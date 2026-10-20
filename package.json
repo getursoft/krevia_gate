@@ -1,0 +1,40 @@
+{
+  "name": "krevia",
+  "private": true,
+  "description": "Krevia — residential society management. Secured. Transparent. Trust.",
+  "packageManager": "pnpm@11.10.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build:shared": "pnpm --filter @krevia/shared build",
+    "dev": "pnpm build:shared && pnpm --parallel --filter @krevia/api --filter @krevia/web dev",
+    "dev:api": "pnpm --filter @krevia/api dev",
+    "dev:web": "pnpm --filter @krevia/web dev",
+    "dev:mobile": "pnpm --filter @krevia/mobile start",
+    "build": "pnpm build:shared && pnpm --filter @krevia/api build && pnpm --filter @krevia/web build",
+    "db:generate": "pnpm --filter @krevia/api prisma:generate",
+    "db:migrate": "pnpm --filter @krevia/api prisma:migrate",
+    "db:seed": "pnpm --filter @krevia/api db:seed",
+    "test": "pnpm build:shared && pnpm test:shared && pnpm test:api && pnpm test:web:unit && pnpm test:mobile",
+    "test:shared": "pnpm --filter @krevia/shared test",
+    "test:api": "pnpm --filter @krevia/api test",
+    "test:web:unit": "pnpm --filter @krevia/web test",
+    "test:mobile": "pnpm --filter @krevia/mobile test",
+    "test:e2e": "pnpm --filter @krevia/web test:e2e",
+    "test:web": "pnpm test:e2e",
+    "export:android": "pnpm --filter @krevia/mobile export:android",
+    "typecheck": "pnpm build:shared && pnpm -r --workspace-concurrency=1 typecheck",
+    "lint": "pnpm -r --workspace-concurrency=1 lint",
+    "smoke": "node scripts/smoke.mjs",
+    "ci:local": "bash scripts/ci-local.sh"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.36.0",
+    "eslint": "^9.36.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^16.4.0",
+    "typescript-eslint": "^8.44.0",
+    "typescript": "5.9.3"
+  }
+}
