@@ -36,9 +36,10 @@ export const MEMBERSHIP_STATUS_LABEL = {
   APPROVED: 'Approved',
   REJECTED: 'Rejected',
   CANCELLED: 'Cancelled',
+  REVOKED: 'Membership revoked',
 } as const;
 
-export const OCCUPANCY_LABEL = { OWNER: 'Owner', TENANT: 'Tenant' } as const;
+export const OCCUPANCY_LABEL = { OWNER: 'Owner', TENANT: 'Tenant', HOUSEHOLD: 'Household member' } as const;
 
 /** Modules shown on the resident dashboard. Only membership is live in Sprint 1. */
 export const PLATFORM_MODULES = [

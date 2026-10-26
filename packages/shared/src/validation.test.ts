@@ -82,3 +82,20 @@ describe('createMembershipRequestSchema', () => {
     expect(createMembershipRequestSchema.safeParse({ ...parsed, occupancy: 'GUEST' }).success).toBe(false);
   });
 });
+
+import { createInvitationSchema, passwordResetConfirmSchema, updateMemberStatusSchema } from './validation';
+
+describe('sprint 2 validation', () => {
+  it('resident invitations need a unit and occupancy; staff invitations must not have one', () => {
+    expect(createInvitationSchema.safeParse({ phone: '9876543210', role: 'RESIDENT' }).success).toBe(false);
+    expect(createInvitationSchema.safeParse({ phone: '9876543210', role: 'GUARD', unitId: '00000000-0000-4000-8000-000000000000' }).success).toBe(false);
+    expect(createInvitationSchema.safeParse({ phone: '9876543210', role: 'ADMIN' }).success).toBe(true);
+    expect(createInvitationSchema.safeParse({ phone: '9876543210', role: 'PLATFORM_ADMIN' }).success).toBe(false);
+  });
+
+  it('status updates cannot carry a role, and reset codes are 6 digits', () => {
+    expect(updateMemberStatusSchema.safeParse({ status: 'ACTIVE', role: 'ADMIN' }).success).toBe(false);
+    expect(passwordResetConfirmSchema.safeParse({ phone: '9876543210', code: '12345', password: 'Abcdefg1' }).success).toBe(false);
+    expect(passwordResetConfirmSchema.safeParse({ phone: '9876543210', code: '123456', password: 'Abcdefg1' }).success).toBe(true);
+  });
+});

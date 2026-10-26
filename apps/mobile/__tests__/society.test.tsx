@@ -42,7 +42,7 @@ describe('Membership request flow', () => {
     await fireEvent.press(screen.getByTestId('continue'));
     expect(await screen.findByText('Tower / block is required')).toBeTruthy();
     expect(screen.getByText('Flat / unit number is required')).toBeTruthy();
-    expect(screen.getByText('Select owner or tenant')).toBeTruthy();
+    expect(screen.getByText('Select owner, tenant or household member')).toBeTruthy();
     expect(mockRouter.push).not.toHaveBeenCalled();
 
     await fireEvent.press(screen.getByLabelText('T2'));

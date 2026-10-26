@@ -31,6 +31,8 @@ export async function createApp(config: AppConfig, logger: AppLogger = createLog
   if (config.trustProxy) app.set('trust proxy', 1);
   app.disable('x-powered-by');
   app.useBodyParser('json', { limit: '32kb' });
+  // Resident CSV import: the raw file is validated server-side, so keep it as text.
+  app.useBodyParser('text', { type: 'text/csv', limit: '2mb' });
   app.use(requestContext(logger));
   app.use(helmet());
   app.use(cookieParser());
@@ -47,7 +49,7 @@ export async function createApp(config: AppConfig, logger: AppLogger = createLog
   if (!config.isProduction) {
     const doc = new DocumentBuilder()
       .setTitle(`${BRAND.name} API`)
-      .setDescription(`${BRAND.tagline} — Sprint 1 resident onboarding API`)
+      .setDescription(`${BRAND.tagline} — society operations API`)
       .setVersion('1.0.0')
       .addBearerAuth({ type: 'http', scheme: 'bearer', description: 'Mobile session token' })
       .addCookieAuth('krevia_session')

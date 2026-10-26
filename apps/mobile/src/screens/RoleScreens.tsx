@@ -237,6 +237,67 @@ function MenuRow({ item, onPress }: { item: NavItem; onPress: () => void }) {
   );
 }
 
+/** Resident household: own directory record and the people in the same flat. */
+export function HouseholdScreen() {
+  const membership = useQuery(() => api.myMembership());
+  const societyId = membership.data?.current?.society.id;
+  const household = useQuery(
+    () => (societyId ? api.myHousehold(societyId) : Promise.resolve(null)),
+    [societyId],
+  );
+  const data = household.data;
+
+  return (
+    <Screen edges={['bottom']} testID="household-screen">
+      <SectionHeader title="My Household" />
+      {membership.loading || household.loading ? (
+        <LoadingView label="Loading your household…" />
+      ) : membership.error ? (
+        <ErrorView error={membership.error} onRetry={membership.reload} />
+      ) : household.error ? (
+        <ErrorView error={household.error} onRetry={household.reload} />
+      ) : !societyId ? (
+        <EmptyView title="No society yet" message="Join a society to see the people recorded in your flat." />
+      ) : !data?.resident ? (
+        <EmptyView title="No directory record" message="Your society has not added you to its resident directory yet. Ask your administrator." />
+      ) : (
+        <>
+          <Card style={{ gap: 8 }}>
+            <Text style={st.statusTitle}>{data.resident.fullName}</Text>
+            <Muted style={{ fontSize: 13 }}>{data.resident.phone ?? 'No mobile number'} · {data.resident.email ?? 'No email'}</Muted>
+            <Muted style={{ fontSize: 13 }}>{data.resident.status === 'ACTIVE' ? 'Active resident' : 'Inactive resident'}</Muted>
+          </Card>
+          {data.units.length === 0 ? (
+            <EmptyView title="No unit linked" message="Your record is not linked to an active unit yet." />
+          ) : (
+            data.units.map((entry) => (
+              <Card key={entry.unit.id} style={{ gap: 8 }} testID={`household-unit-${entry.unit.id}`}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={st.statusTitle}>{entry.unit.tower}-{entry.unit.number}</Text>
+                  <Badge label={`${OCCUPANCY_LABEL[entry.relationship]}${entry.isPrimary ? ' · Primary' : ''}`} />
+                </View>
+                <Muted style={{ fontSize: 13 }}>{entry.unit.floorLevel === null ? 'Floor not recorded' : `Floor ${entry.unit.floorLevel}`}</Muted>
+                <Text style={st.householdHead}>People in this flat</Text>
+                {entry.household.length === 0 ? (
+                  <Muted style={{ fontSize: 13 }}>No other household members are recorded.</Muted>
+                ) : (
+                  entry.household.map((person) => (
+                    <View key={person.id} style={st.householdRow}>
+                      <Text style={st.householdName}>{person.fullName}</Text>
+                      <Muted style={{ fontSize: 12 }}>{OCCUPANCY_LABEL[person.relationship]} · {person.maskedPhone ?? 'No mobile'}</Muted>
+                    </View>
+                  ))
+                )}
+                <Muted style={{ fontSize: 12 }}>Mobile numbers are masked. Contact your administrator for the full number.</Muted>
+              </Card>
+            ))
+          )}
+        </>
+      )}
+    </Screen>
+  );
+}
+
 export function ComingSoonView({ item }: { item: NavItem | undefined }) {
   const router = useRouter();
   return (
@@ -356,5 +417,8 @@ const st = StyleSheet.create({
   searchInput: { flex: 1, fontSize: 15, color: colors.ink },
   menuRow: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 50, paddingHorizontal: 8, borderRadius: 10 },
   menuText: { flex: 1, fontSize: 15, color: colors.ink },
+  householdHead: { fontSize: 14, fontWeight: '700', color: colors.ink, marginTop: 4 },
+  householdRow: { paddingVertical: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  householdName: { fontSize: 14, fontWeight: '600', color: colors.ink },
   soonTitle: { fontSize: 22, fontWeight: '800', color: colors.ink, textAlign: 'center' },
 });

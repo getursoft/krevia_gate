@@ -7,6 +7,7 @@ import {
   type AdminMembershipRequestDto,
   type MembershipStatus,
 } from '@krevia/shared';
+import { AdminTabs } from '@/components/AdminSociety';
 import { FormAlert } from '@/components/Field';
 import { ErrorState, Loading, StatusBadge } from '@/components/States';
 import { api } from '@/lib/api';
@@ -51,10 +52,12 @@ export default function AdminRequestsPage() {
             <option value="PENDING">Pending</option>
             <option value="APPROVED">Approved</option>
             <option value="REJECTED">Rejected</option>
+            <option value="REVOKED">Revoked</option>
             <option value="">All</option>
           </select>
         </div>
       </div>
+      <AdminTabs />
       {societyId && <RequestList key={`${societyId}-${filter}`} societyId={societyId} status={filter} />}
     </div>
   );

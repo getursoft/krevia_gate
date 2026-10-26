@@ -1,5 +1,7 @@
 # Krevia — Authentication & Security (Sprint 1)
 
+> **Superseded in part by Sprint 2.** Passwords now use Argon2id; `SocietyRole` was replaced by `Membership`; password reset, invitations, the central permission policy, tenant isolation and the audit trail are described in [docs/sprint-2/security-report.md](../sprint-2/security-report.md).
+
 ## Authentication model
 
 | Aspect | Implementation | Where |

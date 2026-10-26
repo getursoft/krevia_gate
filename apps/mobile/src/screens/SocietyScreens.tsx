@@ -209,7 +209,7 @@ export function SocietyDetailsScreen() {
       <View style={{ gap: 8 }}>
         <Text style={s.fieldLabel}>You are the</Text>
         <View style={s.chips} accessibilityRole="radiogroup">
-          {(['OWNER', 'TENANT'] as const).map((o) => (
+          {(['OWNER', 'TENANT', 'HOUSEHOLD'] as const).map((o) => (
             <Chip key={o} label={OCCUPANCY_LABEL[o]} selected={occupancy === o} onPress={() => setOccupancy(o)} wide />
           ))}
         </View>

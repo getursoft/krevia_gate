@@ -1,15 +1,17 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import { ApiClientError, BRAND, fieldErrors, registerSchema } from '@krevia/shared';
 import { Field, FormAlert } from '@/components/Field';
 import { KreviaMark } from '@/components/Logo';
 import { api } from '@/lib/api';
+import { safeNext } from '@/lib/safe-next';
 
 export function RegisterForm() {
   const router = useRouter();
+  const next = useSearchParams().get('next');
   const [values, setValues] = useState({ fullName: '', phone: '', email: '', password: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -29,7 +31,8 @@ export function RegisterForm() {
     setSubmitting(true);
     try {
       await api.register(values);
-      router.replace('/society/join');
+      // Invitation links send people here with ?next=/invite?token=…; otherwise start the join flow.
+      router.replace(safeNext(next, '/society/join'));
       router.refresh();
     } catch (err) {
       const e = err as ApiClientError;
@@ -76,7 +79,7 @@ export function RegisterForm() {
         {submitting ? 'Creating account…' : 'Create account'}
       </button>
       <p className="muted" style={{ textAlign: 'center' }}>
-        Already registered? <Link href="/login">Sign in</Link>
+        Already registered? <Link href={next ? `/login?next=${encodeURIComponent(safeNext(next))}` : '/login'}>Sign in</Link>
       </p>
     </form>
   );

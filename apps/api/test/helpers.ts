@@ -27,7 +27,7 @@ export async function setupApp(overrides: NodeJS.ProcessEnv = {}, logger?: AppLo
 
 export async function resetData(prisma: PrismaClient) {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE "MembershipRequest", "Unit", "SocietyRole", "Session", "Society", "User" RESTART IDENTITY CASCADE',
+    'TRUNCATE "AuditEvent", "ResidentImportJob", "ResidentUnit", "Resident", "UnitAssignment", "Membership", "Invitation", "PasswordResetCode", "MembershipRequest", "Unit", "Floor", "Building", "Session", "Society", "User" RESTART IDENTITY CASCADE',
   );
 }
 
@@ -62,13 +62,13 @@ export async function createSociety(prisma: PrismaClient, name: string, towers =
 
 export async function createAdmin(prisma: PrismaClient, app: INestApplication, societyId: string) {
   const admin = await registerMobile(app, { fullName: 'Society Admin' });
-  await prisma.societyRole.create({ data: { userId: admin.user.id, societyId, role: 'ADMIN' } });
+  await prisma.membership.create({ data: { userId: admin.user.id, societyId, role: 'ADMIN', status: 'ACTIVE' } });
   return admin;
 }
 
 export async function createGuard(prisma: PrismaClient, app: INestApplication, societyId: string) {
   const guard = await registerMobile(app, { fullName: 'Gate Guard' });
-  await prisma.societyRole.create({ data: { userId: guard.user.id, societyId, role: 'GUARD' } });
+  await prisma.membership.create({ data: { userId: guard.user.id, societyId, role: 'GUARD', status: 'ACTIVE' } });
   return guard;
 }
 

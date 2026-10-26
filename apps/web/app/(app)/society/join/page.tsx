@@ -206,7 +206,7 @@ function JoinFlow({ onSubmitted }: { onSubmitted: () => void }) {
           <fieldset className="field">
             <legend>You are the</legend>
             <div className="choice-group" style={{ marginTop: 6 }}>
-              {(['OWNER', 'TENANT'] as const).map((o) => (
+              {(['OWNER', 'TENANT', 'HOUSEHOLD'] as const).map((o) => (
                 <label key={o} className="choice">
                   <input
                     type="radio"

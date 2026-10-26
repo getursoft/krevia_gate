@@ -9,7 +9,7 @@ import type { AppRole, UserDto } from './types';
  * `screen` names a screen that exists in Sprint 1; items without it open the
  * shared "Coming soon" screen for that module (`key`).
  */
-export type Screen = 'home' | 'membership' | 'profile' | 'settings' | 'requests';
+export type Screen = 'home' | 'membership' | 'profile' | 'settings' | 'requests' | 'household';
 
 export interface NavItem {
   key: string;
@@ -50,7 +50,7 @@ const MOD = {
   mySociety: m('my-society', 'My Society', 'building', 'Your society and membership.', { screen: 'membership' }),
   profile: m('profile', 'My Profile', 'user', 'Your personal details.', { screen: 'profile' }),
   settings: m('settings', 'Settings', 'settings', 'Account and app settings.', { screen: 'settings' }),
-  family: m('family', 'My Family Members', 'users', 'Add family members to your flat so they can approve visitors.'),
+  family: m('family', 'My Family Members', 'users', 'The people who share your flat and their contact details.', { screen: 'household' }),
   visitors: m('visitors', 'Visitors', 'userPlus', 'Pre-approve guests and see who visited your flat.'),
   preApprove: m('pre-approve', 'Pre-Approve Visitor', 'userPlus', 'Share an entry pass with expected guests and deliveries.', { tone: 'green' }),
   payments: m('payments', 'Payments', 'card', 'Pay maintenance and society dues, and download receipts.', { tone: 'red' }),
@@ -92,7 +92,7 @@ export const ROLE_NAVIGATION: Record<AppRole, RoleNavigation> = {
     title: 'Resident',
     subtitle: 'Everything you need, in one place',
     sidebar: [
-      MOD.home, MOD.mySociety, MOD.visitors, MOD.payments, MOD.amenities, MOD.complaints, MOD.notices,
+      MOD.home, MOD.mySociety, MOD.family, MOD.visitors, MOD.payments, MOD.amenities, MOD.complaints, MOD.notices,
       MOD.events, MOD.directory, MOD.buySell, MOD.documents, MOD.settings,
     ],
     more: [

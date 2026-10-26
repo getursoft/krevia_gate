@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import type { AppLogger, LogLevel } from './logger';
@@ -9,6 +10,15 @@ export interface RequestErrorInfo {
   errorMessage?: string;
   stack?: string;
 }
+
+/** Per-request values available anywhere in the call chain (audit events use them). */
+export interface RequestStore {
+  requestId: string;
+  /** Set by AuthGuard once the session is validated. */
+  userId?: string;
+}
+
+export const requestStore = new AsyncLocalStorage<RequestStore>();
 
 const QUIET_PATHS = new Set(['/api/v1/health', '/api/v1/ready']);
 
@@ -40,6 +50,6 @@ export function requestContext(logger: AppLogger) {
         ...error,
       });
     });
-    next();
+    requestStore.run({ requestId: req.requestId }, next);
   };
 }

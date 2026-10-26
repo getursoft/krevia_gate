@@ -1,4 +1,4 @@
-// Krevia — Sprint 1 data model
+// Krevia data model (Sprint 2: secure society accounts)
 generator client {
   provider = "prisma-client-js"
 }
@@ -18,14 +18,58 @@ enum ClientType {
   MOBILE
 }
 
-enum SocietyRoleType {
+/// Role a membership grants inside one society. Permissions per role live in
+/// packages/shared/src/permissions.ts (ROLE_PERMISSIONS).
+enum MemberRole {
+  RESIDENT
   ADMIN
   GUARD
 }
 
+/// Only ACTIVE memberships grant permissions. The "invited" stage is an
+/// Invitation in PENDING status; a Membership row is created on acceptance.
+enum MemberStatus {
+  ACTIVE
+  SUSPENDED
+  REVOKED
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+enum AuditOutcome {
+  SUCCESS
+  FAILURE
+  DENIED
+}
+
+/// How a person is associated with a unit. HOUSEHOLD covers family members and
+/// dependants who live in the unit without owning or renting it.
 enum OccupancyType {
   OWNER
   TENANT
+  HOUSEHOLD
+}
+
+enum UnitStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum ResidentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ImportJobStatus {
+  PREVIEWED
+  IMPORTING
+  COMPLETED
+  FAILED
 }
 
 enum MembershipStatus {
@@ -33,38 +77,45 @@ enum MembershipStatus {
   APPROVED
   REJECTED
   CANCELLED
+  REVOKED
 }
 
 model User {
-  id           String       @id @default(uuid()) @db.Uuid
+  id                String       @id @default(uuid()) @db.Uuid
   /// E.164, e.g. +919876543210
-  phone        String       @unique @db.VarChar(16)
-  email        String?      @unique @db.VarChar(254)
-  fullName     String       @db.VarChar(80)
-  passwordHash String       @db.VarChar(255)
-  platformRole PlatformRole @default(RESIDENT)
-  createdAt    DateTime     @default(now()) @db.Timestamptz(3)
-  updatedAt    DateTime     @updatedAt @db.Timestamptz(3)
+  phone             String       @unique @db.VarChar(16)
+  email             String?      @unique @db.VarChar(254)
+  fullName          String       @db.VarChar(80)
+  passwordHash      String       @db.VarChar(255)
+  platformRole      PlatformRole @default(RESIDENT)
+  passwordChangedAt DateTime?    @db.Timestamptz(3)
+  createdAt         DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime     @updatedAt @db.Timestamptz(3)
 
   sessions           Session[]
-  societyRoles       SocietyRole[]
+  memberships        Membership[]
   membershipRequests MembershipRequest[] @relation("Applicant")
   reviewedRequests   MembershipRequest[] @relation("Reviewer")
+  passwordResetCodes PasswordResetCode[]
+  residents          Resident[]
 }
 
 model Session {
-  id         String     @id @default(uuid()) @db.Uuid
-  userId     String     @db.Uuid
+  id              String     @id @default(uuid()) @db.Uuid
+  userId          String     @db.Uuid
   /// SHA-256 hex digest of the opaque token. The raw token is never stored.
-  tokenHash  String     @unique @db.Char(64)
-  clientType ClientType
-  userAgent  String?    @db.VarChar(255)
-  expiresAt  DateTime   @db.Timestamptz(3)
-  revokedAt  DateTime?  @db.Timestamptz(3)
-  lastUsedAt DateTime   @default(now()) @db.Timestamptz(3)
-  createdAt  DateTime   @default(now()) @db.Timestamptz(3)
+  tokenHash       String     @unique @db.Char(64)
+  clientType      ClientType
+  userAgent       String?    @db.VarChar(255)
+  expiresAt       DateTime   @db.Timestamptz(3)
+  revokedAt       DateTime?  @db.Timestamptz(3)
+  lastUsedAt      DateTime   @default(now()) @db.Timestamptz(3)
+  createdAt       DateTime   @default(now()) @db.Timestamptz(3)
+  /// Society selected for this session. Re-validated against ACTIVE memberships on every read.
+  activeSocietyId String?    @db.Uuid
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeSociety Society? @relation(fields: [activeSocietyId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([expiresAt])
@@ -84,38 +135,278 @@ model Society {
   updatedAt   DateTime @updatedAt @db.Timestamptz(3)
 
   units              Unit[]
-  roles              SocietyRole[]
+  buildings          Building[]
+  memberships        Membership[]
   membershipRequests MembershipRequest[]
+  invitations        Invitation[]
+  residents          Resident[]
+  importJobs         ResidentImportJob[]
+  sessions           Session[]
 
   @@index([name])
   @@index([city])
 }
 
-model Unit {
-  id        String   @id @default(uuid()) @db.Uuid
-  societyId String   @db.Uuid
-  tower     String   @db.VarChar(20)
-  number    String   @db.VarChar(10)
-  createdAt DateTime @default(now()) @db.Timestamptz(3)
+/// A tower / block. `Society.towers` is kept as the backwards-compatible label
+/// list; every tower is backed by a Building row so floors and units can be
+/// validated against it.
+model Building {
+  id         String    @id @default(uuid()) @db.Uuid
+  societyId  String    @db.Uuid
+  name       String    @db.VarChar(40)
+  archivedAt DateTime? @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(3)
 
-  society            Society             @relation(fields: [societyId], references: [id], onDelete: Cascade)
-  membershipRequests MembershipRequest[]
+  society Society @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  floors  Floor[]
+  units   Unit[]
 
-  @@unique([societyId, tower, number])
+  @@unique([societyId, name])
+  @@unique([id, societyId])
+  @@index([societyId, archivedAt])
 }
 
-model SocietyRole {
-  id        String          @id @default(uuid()) @db.Uuid
-  userId    String          @db.Uuid
-  societyId String          @db.Uuid
-  role      SocietyRoleType
-  createdAt DateTime        @default(now()) @db.Timestamptz(3)
+/// A floor inside one building. `level` is 0 for ground, 1 for the first floor,
+/// and so on; `name` is an optional human label (e.g. "Ground").
+model Floor {
+  id         String   @id @default(uuid()) @db.Uuid
+  societyId  String   @db.Uuid
+  buildingId String   @db.Uuid
+  level      Int
+  name       String?  @db.VarChar(40)
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(3)
 
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  building Building @relation(fields: [buildingId, societyId], references: [id, societyId], onDelete: Cascade)
+  units    Unit[]
+
+  @@unique([buildingId, level])
+  @@unique([id, societyId])
+  @@index([societyId])
+}
+
+model Unit {
+  id         String     @id @default(uuid()) @db.Uuid
+  societyId  String     @db.Uuid
+  /// Legacy tower label, kept in sync with Building.name for existing clients.
+  tower      String     @db.VarChar(20)
+  number     String     @db.VarChar(10)
+  buildingId String     @db.Uuid
+  floorId    String?    @db.Uuid
+  status     UnitStatus @default(ACTIVE)
+  archivedAt DateTime?  @db.Timestamptz(3)
+  createdAt  DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime   @updatedAt @db.Timestamptz(3)
+
+  society            Society             @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  building           Building            @relation(fields: [buildingId, societyId], references: [id, societyId], onDelete: Restrict)
+  floor              Floor?              @relation(fields: [floorId, societyId], references: [id, societyId], onDelete: Restrict)
+  membershipRequests MembershipRequest[]
+  assignments        UnitAssignment[]
+  invitations        Invitation[]
+  residentUnits      ResidentUnit[]
+
+  @@unique([societyId, tower, number])
+  @@unique([buildingId, number])
+  /// Target of composite foreign keys that pin dependent rows to the unit's society.
+  @@unique([id, societyId])
+  @@index([societyId, status])
+  @@index([societyId, buildingId, floorId])
+}
+
+/// A user's role in one society. A person can hold several roles in the same
+/// society (e.g. ADMIN and RESIDENT) and belong to several societies.
+model Membership {
+  id                String       @id @default(uuid()) @db.Uuid
+  userId            String       @db.Uuid
+  societyId         String       @db.Uuid
+  role              MemberRole
+  status            MemberStatus @default(ACTIVE)
+  invitationId      String?      @unique @db.Uuid
+  statusChangedAt   DateTime?    @db.Timestamptz(3)
+  statusChangedById String?      @db.Uuid
+  createdAt         DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime     @updatedAt @db.Timestamptz(3)
+
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  society     Society          @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  invitation  Invitation?      @relation(fields: [invitationId], references: [id], onDelete: SetNull)
+  assignments UnitAssignment[]
+
+  /// No duplicate memberships: one row per (user, society, role); status changes reuse it.
+  @@unique([userId, societyId, role])
+  @@unique([id, societyId])
+  @@index([societyId, role, status])
+}
+
+/// Resident ↔ unit link. Composite foreign keys guarantee that the unit and the
+/// membership belong to the same society as the assignment.
+model UnitAssignment {
+  id           String        @id @default(uuid()) @db.Uuid
+  societyId    String        @db.Uuid
+  unitId       String        @db.Uuid
+  membershipId String        @db.Uuid
+  occupancy    OccupancyType
+  assignedById String?       @db.Uuid
+  assignedAt   DateTime      @default(now()) @db.Timestamptz(3)
+  endedAt      DateTime?     @db.Timestamptz(3)
+  endedById    String?       @db.Uuid
+
+  unit         Unit          @relation(fields: [unitId, societyId], references: [id, societyId], onDelete: Cascade)
+  membership   Membership    @relation(fields: [membershipId, societyId], references: [id, societyId], onDelete: Cascade)
+  residentUnit ResidentUnit?
+
+  @@index([societyId, unitId])
+  @@index([membershipId])
+}
+
+/// One person in a society's resident directory. This is deliberately separate
+/// from User: owners, tenants and household members can be recorded before they
+/// have an account, and one person can be linked to several units through
+/// ResidentUnit without being duplicated. `userId` is set only when a matching
+/// account exists in the same society.
+model Resident {
+  id                    String         @id @default(uuid()) @db.Uuid
+  societyId             String         @db.Uuid
+  userId                String?        @db.Uuid
+  fullName              String         @db.VarChar(80)
+  phone                 String?        @db.VarChar(16)
+  email                 String?        @db.VarChar(254)
+  status                ResidentStatus @default(ACTIVE)
+  emergencyContactName  String?        @db.VarChar(80)
+  emergencyContactPhone String?        @db.VarChar(16)
+  /// [{ number: "MH12AB1234", type: "Car" }]
+  vehicles              Json           @default("[]")
+  createdById           String?        @db.Uuid
+  archivedAt            DateTime?      @db.Timestamptz(3)
+  createdAt             DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime       @updatedAt @db.Timestamptz(3)
+
+  society Society        @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  user    User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  units   ResidentUnit[]
+
+  @@unique([societyId, phone])
+  @@unique([societyId, userId])
+  @@unique([id, societyId])
+  @@index([societyId, status])
+  @@index([societyId, fullName])
+}
+
+/// Explicit person ↔ unit occupancy link. `assignmentId` links the directory row
+/// to the authenticated UnitAssignment when the resident has an app account.
+model ResidentUnit {
+  id           String        @id @default(uuid()) @db.Uuid
+  societyId    String        @db.Uuid
+  residentId   String        @db.Uuid
+  unitId       String        @db.Uuid
+  relationship OccupancyType
+  isPrimary    Boolean       @default(false)
+  assignmentId String?       @unique @db.Uuid
+  startedAt    DateTime      @default(now()) @db.Timestamptz(3)
+  endedAt      DateTime?     @db.Timestamptz(3)
+  createdById  String?       @db.Uuid
+
+  resident   Resident        @relation(fields: [residentId, societyId], references: [id, societyId], onDelete: Cascade)
+  unit       Unit            @relation(fields: [unitId, societyId], references: [id, societyId], onDelete: Restrict)
+  assignment UnitAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+
+  @@index([societyId, unitId, endedAt])
+  @@index([residentId, endedAt])
+}
+
+/// A validated CSV import. The parsed rows are stored so confirmation imports
+/// exactly what the administrator previewed, and the file hash makes retries
+/// idempotent within a society.
+model ResidentImportJob {
+  id            String          @id @default(uuid()) @db.Uuid
+  societyId     String          @db.Uuid
+  createdById   String?         @db.Uuid
+  fileName      String          @db.VarChar(120)
+  fileHash      String          @db.Char(64)
+  status        ImportJobStatus @default(PREVIEWED)
+  totalRows     Int             @default(0)
+  validRows     Int             @default(0)
+  invalidRows   Int             @default(0)
+  duplicateRows Int             @default(0)
+  createdRows   Int             @default(0)
+  updatedRows   Int             @default(0)
+  skippedRows   Int             @default(0)
+  rejectedRows  Int             @default(0)
+  rows          Json            @default("[]")
+  errors        Json            @default("[]")
+  failureReason String?         @db.VarChar(280)
+  confirmedAt   DateTime?       @db.Timestamptz(3)
+  completedAt   DateTime?       @db.Timestamptz(3)
+  createdAt     DateTime        @default(now()) @db.Timestamptz(3)
+
   society Society @relation(fields: [societyId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, societyId])
-  @@index([societyId])
+  @@unique([societyId, fileHash])
+  @@index([societyId, createdAt])
+}
+
+/// Invitation to join a society with a fixed role. Only the SHA-256 hash of the
+/// token is stored; the raw token is shown once to the inviter.
+model Invitation {
+  id           String           @id @default(uuid()) @db.Uuid
+  societyId    String           @db.Uuid
+  /// E.164 phone the invitation is bound to. Only that account can accept it.
+  phone        String           @db.VarChar(16)
+  role         MemberRole
+  unitId       String?          @db.Uuid
+  occupancy    OccupancyType?
+  tokenHash    String           @unique @db.Char(64)
+  status       InvitationStatus @default(PENDING)
+  expiresAt    DateTime         @db.Timestamptz(3)
+  createdById  String?          @db.Uuid
+  acceptedById String?          @db.Uuid
+  acceptedAt   DateTime?        @db.Timestamptz(3)
+  revokedById  String?          @db.Uuid
+  revokedAt    DateTime?        @db.Timestamptz(3)
+  createdAt    DateTime         @default(now()) @db.Timestamptz(3)
+
+  society    Society     @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  unit       Unit?       @relation(fields: [unitId, societyId], references: [id, societyId], onDelete: Cascade)
+  membership Membership?
+
+  @@index([societyId, status])
+  @@index([phone])
+}
+
+/// One-time password-reset code. Stores an HMAC (keyed with AUTH_PEPPER), never the code.
+model PasswordResetCode {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  codeHash   String    @db.Char(64)
+  expiresAt  DateTime  @db.Timestamptz(3)
+  attempts   Int       @default(0)
+  consumedAt DateTime? @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+/// Append-only security audit trail. A database trigger rejects UPDATE and DELETE.
+/// No foreign keys, so events outlive the users and societies they mention.
+model AuditEvent {
+  id          String       @id @default(uuid()) @db.Uuid
+  createdAt   DateTime     @default(now()) @db.Timestamptz(3)
+  requestId   String?      @db.VarChar(64)
+  actorUserId String?      @db.Uuid
+  action      String       @db.VarChar(64)
+  outcome     AuditOutcome
+  societyId   String?      @db.Uuid
+  targetType  String?      @db.VarChar(32)
+  targetId    String?      @db.VarChar(64)
+  metadata    Json         @default("{}")
+
+  @@index([societyId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([action, createdAt])
 }
 
 /// A partial unique index (see migration) allows at most one PENDING or

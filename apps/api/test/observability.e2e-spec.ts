@@ -152,8 +152,22 @@ describe('startup configuration validation', () => {
   });
 
   it('describes the database target without credentials', () => {
-    const config = loadConfig({ NODE_ENV: 'production', DATABASE_URL: 'postgresql://user:pw@localhost:5432/krevia_test' });
+    const config = loadConfig({
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://user:pw@localhost:5432/krevia_test',
+      AUTH_PEPPER: 'p'.repeat(32),
+    });
     expect(config.databaseTarget).toBe('krevia_test on localhost:5432');
     expect(config.logLevel).toBe('info');
+  });
+
+  it('production requires AUTH_PEPPER, refuses the dev outbox and defaults to no message delivery', () => {
+    const base = { NODE_ENV: 'production', DATABASE_URL: 'postgresql://user:pw@localhost:5432/krevia_test' };
+    expect(() => loadConfig(base)).toThrow(/AUTH_PEPPER: is required in production/);
+    expect(() => loadConfig({ ...base, AUTH_PEPPER: 'short' })).toThrow(/AUTH_PEPPER: must be at least 32 characters/);
+    expect(() => loadConfig({ ...base, AUTH_PEPPER: 'p'.repeat(32), MESSAGE_DELIVERY: 'dev-outbox' })).toThrow(/dev-outbox is not allowed/);
+    const config = loadConfig({ ...base, AUTH_PEPPER: 'p'.repeat(32) });
+    expect(config.messageDelivery).toBe('none');
+    expect(config.cookieSecure).toBe(true);
   });
 });

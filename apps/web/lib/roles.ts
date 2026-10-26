@@ -24,6 +24,8 @@ export function hrefFor(role: AppRole, item: NavItem): string {
       return '/settings';
     case 'requests':
       return '/admin/requests';
+    case 'household':
+      return '/resident/household';
     default:
       return `${ROLE_PREFIX[role]}/m/${item.key}`;
   }

@@ -127,6 +127,16 @@ fieldset { border: none; padding: 0; margin: 0; }
 .badge-REJECTED { background: var(--danger-soft); color: var(--danger); }
 .badge-CANCELLED { background: #eef1ef; color: var(--ink-muted); }
 .badge-soon { background: #eef1ef; color: var(--ink-muted); }
+.badge-REVOKED, .badge-EXPIRED, .badge-FAILURE { background: #eef1ef; color: var(--ink-muted); }
+.badge-ACTIVE, .badge-ACCEPTED, .badge-SUCCESS { background: var(--success-soft); color: var(--success); }
+.badge-SUSPENDED, .badge-INVITED { background: var(--warning-soft); color: var(--warning); }
+.badge-DENIED { background: var(--danger-soft); color: var(--danger); }
+/* Resident-management sub-navigation */
+.admin-tabs { gap: 4px; border-bottom: 1px solid var(--border); }
+.admin-tab { padding: 10px 14px; text-decoration: none; color: var(--ink-muted); font-weight: 600; font-size: 0.92rem; border-bottom: 3px solid transparent; margin-bottom: -1px; }
+.admin-tab:hover { color: var(--forest); }
+.admin-tab[aria-current='page'] { color: var(--forest); border-bottom-color: var(--forest); }
+@media (max-width: 900px) { .admin-tabs { flex-wrap: nowrap; overflow-x: auto; } .admin-tab { white-space: nowrap; } }
 .alert { padding: 12px 14px; border-radius: var(--radius-md); font-size: 0.92rem; border: 1px solid transparent; }
 .alert-error { background: var(--danger-soft); color: var(--danger); border-color: #f5c9c4; }
 .alert-success { background: var(--success-soft); color: var(--success); border-color: #bfe6cb; }

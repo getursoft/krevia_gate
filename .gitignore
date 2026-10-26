@@ -13,6 +13,8 @@ apps/mobile/ios/
 apps/mobile/android/
 apps/web/test-results/
 apps/web/playwright-report/
+# Local database dumps contain personal data; never commit them.
+backups/
 .DS_Store
 *.log
 .tmp/

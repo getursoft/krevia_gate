@@ -1,21 +1,31 @@
 import { Body, Controller, Get, HttpCode, Inject, Post, Req, Res, SetMetadata } from '@nestjs/common';
 import { ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { CLIENT_HEADER, loginSchema, registerSchema, type AuthResponseDto } from '@krevia/shared';
+import {
+  CLIENT_HEADER,
+  loginSchema,
+  passwordResetConfirmSchema,
+  passwordResetRequestSchema,
+  registerSchema,
+  type AuthResponseDto,
+  type MeDto,
+} from '@krevia/shared';
 import type { ClientType, User } from '@prisma/client';
 import type { Request, Response } from 'express';
+import { AuditService } from '../audit/audit.service';
 import { APP_CONFIG, SESSION_COOKIE, type AppConfig } from '../config';
 import { Errors } from '../common/errors';
 import { jsonSchema } from '../common/openapi';
 import { validate } from '../common/validate';
 import { PrismaService } from '../prisma/prisma.service';
 import { CurrentSession, Public } from './auth.guard';
-import { getDummyHash, hashPassword, verifyPassword } from './password';
+import { getDummyHash, hashPassword, needsRehash, verifyPassword } from './password';
+import { PasswordResetService, RESET_REQUESTED_MESSAGE } from './password-reset.service';
 import { SessionService, type SessionWithUser } from './session.service';
 import { toUserDto } from './user.mapper';
 
 export const AUTH_RATE_LIMITED = 'authRateLimited';
 /** Applies the strict `auth` throttler (per client IP) to a route. */
-const AuthRateLimited = () => SetMetadata(AUTH_RATE_LIMITED, true);
+export const AuthRateLimited = () => SetMetadata(AUTH_RATE_LIMITED, true);
 
 @ApiTags('auth')
 @Controller('auth')
@@ -23,6 +33,8 @@ export class AuthController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly sessions: SessionService,
+    private readonly resets: PasswordResetService,
+    private readonly audit: AuditService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -51,6 +63,7 @@ export class AuthController {
       },
     });
     res.status(201);
+    await this.audit.record({ action: 'auth.register', outcome: 'SUCCESS', actorUserId: user.id, targetType: 'user', targetId: user.id });
     return this.startSession(user, req, res);
   }
 
@@ -66,8 +79,21 @@ export class AuthController {
     // Always run a hash comparison so response time does not reveal whether the number exists.
     const ok = await verifyPassword(input.password, user?.passwordHash ?? (await getDummyHash()));
     if (!user || !ok) {
+      // The phone number is not stored; a known account is referenced by id only.
+      await this.audit.recordLimited(`login:${req.ip}`, {
+        action: 'auth.login',
+        outcome: 'FAILURE',
+        actorUserId: null,
+        ...(user && { targetType: 'user', targetId: user.id }),
+        metadata: { reason: user ? 'wrong_password' : 'unknown_account' },
+      });
       throw Errors.unauthenticated('Incorrect mobile number or password.');
     }
+    if (needsRehash(user.passwordHash)) {
+      // Transparent upgrade of Sprint 1 scrypt hashes to Argon2id.
+      await this.prisma.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(input.password) } });
+    }
+    await this.audit.record({ action: 'auth.login', outcome: 'SUCCESS', actorUserId: user.id, targetType: 'user', targetId: user.id });
     return this.startSession(user, req, res);
   }
 
@@ -76,13 +102,47 @@ export class AuthController {
   @ApiOperation({ summary: 'Revoke the current session' })
   async logout(@CurrentSession() session: SessionWithUser, @Res({ passthrough: true }) res: Response) {
     await this.sessions.revoke(session.id);
+    await this.audit.record({ action: 'auth.logout', outcome: 'SUCCESS' });
+    res.clearCookie(SESSION_COOKIE, this.cookieOptions());
+  }
+
+  @Post('logout-all')
+  @HttpCode(204)
+  @ApiOperation({ summary: 'Revoke every session of the current user (sign out on all devices)' })
+  async logoutAll(@CurrentSession() session: SessionWithUser, @Res({ passthrough: true }) res: Response) {
+    const count = await this.sessions.revokeAllForUser(session.userId);
+    await this.audit.record({ action: 'auth.logout_all', outcome: 'SUCCESS', metadata: { revokedLogins: count } });
     res.clearCookie(SESSION_COOKIE, this.cookieOptions());
   }
 
   @Get('me')
-  @ApiOperation({ summary: 'Current authenticated user' })
-  async me(@CurrentSession() session: SessionWithUser) {
-    return { user: await toUserDto(this.prisma, session.user) };
+  @ApiOperation({ summary: 'Current authenticated user and the validated active society of this session' })
+  async me(@CurrentSession() session: SessionWithUser): Promise<MeDto> {
+    return { user: await toUserDto(this.prisma, session.user), activeSocietyId: await this.sessions.activeSocietyId(session) };
+  }
+
+  @Public()
+  @AuthRateLimited()
+  @Post('password-reset/request')
+  @HttpCode(202)
+  @ApiOperation({ summary: 'Send a 6-digit reset code. Same response whether or not the number is registered.' })
+  @ApiBody({ schema: jsonSchema(passwordResetRequestSchema) })
+  async requestReset(@Body() body: unknown, @Req() req: Request) {
+    const { phone } = validate(passwordResetRequestSchema, body);
+    await this.resets.request(phone, req.ip ?? 'unknown');
+    return { message: RESET_REQUESTED_MESSAGE };
+  }
+
+  @Public()
+  @AuthRateLimited()
+  @Post('password-reset/confirm')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Set a new password with a valid reset code. Signs the account out everywhere.' })
+  @ApiBody({ schema: jsonSchema(passwordResetConfirmSchema) })
+  async confirmReset(@Body() body: unknown, @Req() req: Request) {
+    const input = validate(passwordResetConfirmSchema, body);
+    await this.resets.confirm(input.phone, input.code, input.password, req.ip ?? 'unknown');
+    return { message: 'Your password has been changed. Sign in with your new password.' };
   }
 
   private async startSession(user: User, req: Request, res: Response): Promise<AuthResponseDto> {

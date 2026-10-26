@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { ClientType, Session, User } from '@prisma/client';
+import type { ClientType, Prisma, Session, User } from '@prisma/client';
 import { createHash, randomBytes } from 'node:crypto';
 import { APP_CONFIG, type AppConfig } from '../config';
 import { PrismaService } from '../prisma/prisma.service';
@@ -54,5 +54,32 @@ export class SessionService {
       where: { id: sessionId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+  }
+
+  /** Revokes every live session of a user (logout everywhere, password reset). Returns how many. */
+  async revokeAllForUser(userId: string, db: Prisma.TransactionClient | PrismaService = this.prisma): Promise<number> {
+    const result = await db.session.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    return result.count;
+  }
+
+  /**
+   * The session's active society, only while the user still holds an ACTIVE
+   * membership there. A stale selection reads as null; it never grants access
+   * (every society request is authorised independently).
+   */
+  async activeSocietyId(session: Session): Promise<string | null> {
+    if (!session.activeSocietyId) return null;
+    const active = await this.prisma.membership.findFirst({
+      where: { userId: session.userId, societyId: session.activeSocietyId, status: 'ACTIVE' },
+      select: { id: true },
+    });
+    return active ? session.activeSocietyId : null;
+  }
+
+  async setActiveSociety(sessionId: string, societyId: string) {
+    await this.prisma.session.update({ where: { id: sessionId }, data: { activeSocietyId: societyId } });
   }
 }

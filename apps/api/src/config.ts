@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseEnv } from 'node:util';
@@ -6,6 +7,9 @@ import { z } from 'zod';
 /** Enum whose error lists the allowed values but never the received one. */
 const oneOf = <const T extends [string, ...string[]]>(values: T) =>
   z.enum(values, { errorMap: () => ({ message: `must be one of: ${values.join(', ')}` }) });
+
+/** Treats `KEY=` (empty) in a .env file as unset. */
+const blankAsUnset = <T extends z.ZodTypeAny>(schema: T) => z.preprocess((v) => (v === '' ? undefined : v), schema);
 
 const envSchema = z.object({
   NODE_ENV: oneOf(['development', 'test', 'production']).default('development'),
@@ -24,6 +28,14 @@ const envSchema = z.object({
     .transform((v) => v === 'true'),
   AUTH_RATE_LIMIT: z.coerce.number().int().min(1).default(10),
   AUTH_RATE_TTL_SECONDS: z.coerce.number().int().min(1).default(60),
+  /** Where invitation and password-reset messages go. dev-outbox is refused in production. */
+  MESSAGE_DELIVERY: blankAsUnset(oneOf(['dev-outbox', 'none']).optional()),
+  /** Secret key for hashing password-reset codes. Required in production (32+ characters). */
+  AUTH_PEPPER: blankAsUnset(z.string().min(32, 'must be at least 32 characters').optional()),
+  /** Public website origin used in invitation links. Defaults to the first CORS origin. */
+  PUBLIC_WEB_URL: blankAsUnset(z.string().url('must be a URL').optional()),
+  INVITE_TTL_HOURS: z.coerce.number().int().min(1).max(24 * 30).default(168),
+  RESET_CODE_TTL_MINUTES: z.coerce.number().int().min(2).max(60).default(10),
   LOG_LEVEL: oneOf(['error', 'warn', 'info', 'debug']).optional(),
   LOG_FORMAT: oneOf(['json', 'pretty']).default('json'),
 });
@@ -53,18 +65,33 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   }
   const c = parsed.data;
   const isProduction = c.NODE_ENV === 'production';
+  const messageDelivery = c.MESSAGE_DELIVERY ?? (isProduction ? 'none' : 'dev-outbox');
+  const productionIssues = [
+    ...(isProduction && !c.AUTH_PEPPER ? ['  - AUTH_PEPPER: is required in production (32+ random characters)'] : []),
+    ...(isProduction && messageDelivery === 'dev-outbox' ? ['  - MESSAGE_DELIVERY: dev-outbox is not allowed in production'] : []),
+  ];
+  if (productionIssues.length) {
+    throw new Error(`Invalid environment configuration:\n${productionIssues.join('\n')}\nSet these in the process environment.`);
+  }
+  const corsOrigins = c.CORS_ORIGINS.split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
   return {
     env: c.NODE_ENV,
     isProduction,
     port: c.PORT,
-    corsOrigins: c.CORS_ORIGINS.split(',')
-      .map((o) => o.trim())
-      .filter(Boolean),
+    corsOrigins,
     sessionTtlMs: c.SESSION_TTL_HOURS * 3600 * 1000,
     cookieSecure: isProduction || c.COOKIE_SECURE,
     trustProxy: c.TRUST_PROXY,
     authRateLimit: c.AUTH_RATE_LIMIT,
     authRateTtlMs: c.AUTH_RATE_TTL_SECONDS * 1000,
+    messageDelivery,
+    /** Outside production a per-process random pepper is used: reset codes do not survive a restart. */
+    authPepper: c.AUTH_PEPPER ?? randomBytes(32).toString('hex'),
+    publicWebUrl: (c.PUBLIC_WEB_URL ?? corsOrigins[0] ?? 'http://localhost:3100').replace(/\/$/, ''),
+    inviteTtlMs: c.INVITE_TTL_HOURS * 3600 * 1000,
+    resetCodeTtlMs: c.RESET_CODE_TTL_MINUTES * 60 * 1000,
     logLevel: c.LOG_LEVEL ?? (c.NODE_ENV === 'test' ? 'error' : 'info'),
     logFormat: c.LOG_FORMAT,
     /** Safe description of the database target for logs: name + host only, never credentials. */

@@ -28,7 +28,14 @@ async function main() {
   const prisma = new PrismaClient();
   try {
     for (const s of SAMPLE_SOCIETIES) {
-      await prisma.society.upsert({ where: { slug: s.slug }, update: { ...s }, create: { ...s } });
+      const society = await prisma.society.upsert({ where: { slug: s.slug }, update: { ...s }, create: { ...s } });
+      for (const name of s.towers) {
+        await prisma.building.upsert({
+          where: { societyId_name: { societyId: society.id, name } },
+          update: {},
+          create: { societyId: society.id, name },
+        });
+      }
     }
     console.log(`Seeded ${SAMPLE_SOCIETIES.length} sample societies.`);
 
@@ -48,12 +55,27 @@ async function main() {
         update: {},
         create: { phone, fullName: s.name, passwordHash: await hashPassword(s.password) },
       });
-      await prisma.societyRole.upsert({
-        where: { userId_societyId: { userId: user.id, societyId: society.id } },
-        update: { role: s.role },
-        create: { userId: user.id, societyId: society.id, role: s.role },
+      await prisma.membership.upsert({
+        where: { userId_societyId_role: { userId: user.id, societyId: society.id, role: s.role } },
+        update: { status: 'ACTIVE' },
+        create: { userId: user.id, societyId: society.id, role: s.role, status: 'ACTIVE' },
       });
       console.log(`Demo ${s.role.toLowerCase()} ${phone.slice(0, 5)}*****${phone.slice(-2)} → ${society.name}.`);
+    }
+
+    // Optional platform administrator: can create societies and invite their first admin.
+    // Holds no society membership, so it cannot read any society's data.
+    const platformPhone = normalizeIndianMobile(process.env.SEED_PLATFORM_ADMIN_PHONE ?? '');
+    const platformPassword = process.env.SEED_PLATFORM_ADMIN_PASSWORD;
+    if (platformPhone && platformPassword) {
+      await prisma.user.upsert({
+        where: { phone: platformPhone },
+        update: { platformRole: 'PLATFORM_ADMIN' },
+        create: { phone: platformPhone, fullName: 'Platform Admin (Demo)', platformRole: 'PLATFORM_ADMIN', passwordHash: await hashPassword(platformPassword) },
+      });
+      console.log(`Demo platform admin ${platformPhone.slice(0, 5)}*****${platformPhone.slice(-2)}.`);
+    } else {
+      console.log('SEED_PLATFORM_ADMIN_PHONE / SEED_PLATFORM_ADMIN_PASSWORD not set — skipping demo platform admin.');
     }
   } finally {
     await prisma.$disconnect();

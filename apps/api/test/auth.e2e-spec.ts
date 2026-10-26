@@ -45,9 +45,9 @@ describe('Health, auth and sessions', () => {
         .expect(201);
       expect(res.body.user).toMatchObject({ fullName: 'Asha Rao', phone: `+91${phone}`, email: 'asha@example.com' });
       expect(res.body.token).toEqual(expect.any(String));
-      expect(JSON.stringify(res.body)).not.toMatch(/passwordHash|scrypt/);
+      expect(JSON.stringify(res.body)).not.toMatch(/passwordHash|scrypt|argon2/);
       const stored = await prisma.user.findUniqueOrThrow({ where: { phone: `+91${phone}` } });
-      expect(stored.passwordHash).toMatch(/^scrypt\$/);
+      expect(stored.passwordHash).toMatch(/^\$argon2id\$/);
       expect(stored.passwordHash).not.toContain(PASSWORD);
     });
 

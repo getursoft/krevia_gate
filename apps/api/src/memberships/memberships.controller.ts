@@ -3,14 +3,17 @@ import { ApiBody, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { createMembershipRequestSchema, reviewMembershipRequestSchema } from '@krevia/shared';
 import { MembershipStatus, Prisma } from '@prisma/client';
 import { z } from 'zod';
+import { AuditService } from '../audit/audit.service';
 import { CurrentSession } from '../auth/auth.guard';
 import type { SessionWithUser } from '../auth/session.service';
+import { RequireSocietyPermission } from '../authz/permission.guard';
+import { SocietyAccessService } from '../authz/society-access.service';
 import { Errors } from '../common/errors';
 import { jsonSchema } from '../common/openapi';
 import { validate, validateId } from '../common/validate';
 import { PrismaService } from '../prisma/prisma.service';
+import { MembershipLifecycleService } from '../members/membership-lifecycle.service';
 import { toSocietySummary } from '../societies/society.mapper';
-import { MembershipAccessService } from './membership-access.service';
 import {
   adminMembershipInclude,
   membershipInclude,
@@ -27,7 +30,9 @@ const ACTIVE_STATUSES: MembershipStatus[] = ['PENDING', 'APPROVED'];
 export class MembershipsController {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly access: MembershipAccessService,
+    private readonly access: SocietyAccessService,
+    private readonly lifecycle: MembershipLifecycleService,
+    private readonly audit: AuditService,
   ) {}
 
   @Post('membership-requests')
@@ -50,16 +55,31 @@ export class MembershipsController {
 
     try {
       const request = await this.prisma.$transaction(async (tx) => {
-        const unit = await tx.unit.upsert({
-          where: { societyId_tower_number: { societyId: society.id, tower, number: input.unitNumber } },
-          update: {},
-          create: { societyId: society.id, tower, number: input.unitNumber },
+        let building = await tx.building.findFirst({
+          where: { societyId: society.id, name: { equals: tower, mode: 'insensitive' } },
         });
-        return tx.membershipRequest.create({
+        if (building?.archivedAt) throw Errors.conflict('This tower / block is archived.');
+        if (!building) {
+          building = await tx.building.create({ data: { societyId: society.id, name: tower } });
+          if (!society.towers.some((t) => t.toLowerCase() === building!.name.toLowerCase())) {
+            await tx.society.update({ where: { id: society.id }, data: { towers: { set: [...society.towers, building!.name] } } });
+          }
+        }
+        const unit = await tx.unit.upsert({
+          where: { societyId_tower_number: { societyId: society.id, tower: building.name, number: input.unitNumber } },
+          update: { buildingId: building.id },
+          create: { societyId: society.id, tower: building.name, buildingId: building.id, number: input.unitNumber },
+        });
+        const created = await tx.membershipRequest.create({
           // Status is never taken from client input.
           data: { userId: session.userId, societyId: society.id, unitId: unit.id, occupancy: input.occupancy },
           include: membershipInclude,
         });
+        await this.audit.record(
+          { action: 'membership.request.created', outcome: 'SUCCESS', societyId: society.id, targetType: 'membership_request', targetId: created.id },
+          tx,
+        );
+        return created;
       });
       return { request: toMembershipDto(request) };
     } catch (err) {
@@ -110,29 +130,20 @@ export class MembershipsController {
   }
 
   @Get('admin/societies')
-  @ApiOperation({ summary: 'Societies I administer' })
+  @ApiOperation({ summary: 'Societies where I hold an ACTIVE administrator membership (no platform-wide listing)' })
   async adminSocieties(@CurrentSession() session: SessionWithUser) {
-    const where: Prisma.SocietyWhereInput =
-      session.user.platformRole === 'PLATFORM_ADMIN'
-        ? {}
-        : { roles: { some: { userId: session.userId, role: 'ADMIN' } } };
+    const where: Prisma.SocietyWhereInput = { memberships: { some: { userId: session.userId, role: 'ADMIN', status: 'ACTIVE' } } };
     const societies = await this.prisma.society.findMany({ where, orderBy: { name: 'asc' } });
     return { items: societies.map(toSocietySummary) };
   }
 
   @Get('societies/:id/membership-requests')
+  @RequireSocietyPermission('membership.review', 'id')
   @ApiOperation({ summary: 'Membership requests for a society (society admins only)' })
   @ApiQuery({ name: 'status', required: false, enum: MembershipStatus })
-  async listForSociety(
-    @CurrentSession() session: SessionWithUser,
-    @Param('id') id: string,
-    @Query() query: unknown,
-  ) {
+  async listForSociety(@Param('id') id: string, @Query() query: unknown) {
     const societyId = validateId(id);
     const { status } = validate(statusFilterSchema, query);
-    const society = await this.prisma.society.findUnique({ where: { id: societyId }, select: { id: true } });
-    if (!society) throw Errors.notFound('Society not found.');
-    await this.access.requireSocietyAdmin(session.user, societyId);
     const items = await this.prisma.membershipRequest.findMany({
       where: { societyId, ...(status && { status }) },
       include: adminMembershipInclude,
@@ -163,15 +174,42 @@ export class MembershipsController {
     const { note } = validate(reviewMembershipRequestSchema, body);
     const existing = await this.prisma.membershipRequest.findUnique({ where: { id: requestId } });
     if (!existing) throw Errors.notFound('Membership request not found.');
-    await this.access.requireSocietyAdmin(session.user, existing.societyId);
+    await this.access.authorize(session.user, existing.societyId, 'membership.review', 'membership-requests/:id/review');
     if (existing.userId === session.userId) throw Errors.forbidden('You cannot review your own request.');
 
-    // Conditional update makes concurrent approve/reject safe.
-    const result = await this.prisma.membershipRequest.updateMany({
-      where: { id: requestId, status: 'PENDING' },
-      data: { status, reviewNote: note ?? null, reviewedById: session.userId, reviewedAt: new Date() },
+    await this.prisma.$transaction(async (tx) => {
+      // Conditional update makes concurrent approve/reject safe.
+      const result = await tx.membershipRequest.updateMany({
+        where: { id: requestId, status: 'PENDING' },
+        data: { status, reviewNote: note ?? null, reviewedById: session.userId, reviewedAt: new Date() },
+      });
+      if (result.count === 0) throw Errors.conflict('This request has already been reviewed or withdrawn.');
+      if (status === 'APPROVED') {
+        const membership = await this.lifecycle.activate(tx, {
+          userId: existing.userId,
+          societyId: existing.societyId,
+          role: 'RESIDENT',
+          actorUserId: session.userId,
+        });
+        await this.lifecycle.assignUnit(tx, {
+          societyId: existing.societyId,
+          unitId: existing.unitId,
+          membershipId: membership.id,
+          occupancy: existing.occupancy,
+          actorUserId: session.userId,
+        });
+      }
+      await this.audit.record(
+        {
+          action: status === 'APPROVED' ? 'membership.request.approved' : 'membership.request.rejected',
+          outcome: 'SUCCESS',
+          societyId: existing.societyId,
+          targetType: 'membership_request',
+          targetId: requestId,
+        },
+        tx,
+      );
     });
-    if (result.count === 0) throw Errors.conflict('This request has already been reviewed or withdrawn.');
     const request = await this.prisma.membershipRequest.findUniqueOrThrow({
       where: { id: requestId },
       include: adminMembershipInclude,

@@ -2,7 +2,7 @@
 
 **Secured. Transparent. Trust.**
 
-Krevia is a residential society management platform for India. Sprint 1 delivers verified resident onboarding (accounts, society search, membership requests, society-admin review, profile) and role-based dashboards for **Residents**, **Society Admins / AOA** and **Security Guards**, on the web, iOS and Android.
+Krevia is a residential society management platform for India. Sprint 1 delivered verified resident onboarding (accounts, society search, membership requests, society-admin review, profile) and role-based dashboards for **Residents**, **Society Admins / AOA** and **Security Guards**, on the web, iOS and Android. Sprint 2 adds secure society accounts: Argon2id passwords, password reset by one-time code, invitations, memberships with statuses, unit assignment, a central permission policy, tenant isolation and an append-only audit trail (see [docs/sprint-2/security-report.md](docs/sprint-2/security-report.md)). Sprint 3 adds buildings and floors, an archival-aware unit directory, a resident and household directory, and a validated, idempotent CSV import with a downloadable error report (see [docs/sprint-3/implementation-report.md](docs/sprint-3/implementation-report.md)).
 
 This README is the developer guide. Everything runs on **localhost**; no cloud account, deployment or paid service is needed.
 
@@ -63,10 +63,15 @@ cp apps/mobile/.env.example    apps/mobile/.env          # optional
 | API | `COOKIE_SECURE` | no | `false` | Secure cookie flag (always on in production) |
 | API | `TRUST_PROXY` | no | `false` | trust one proxy hop for client IPs |
 | API | `AUTH_RATE_LIMIT` / `AUTH_RATE_TTL_SECONDS` | no | `10` / `60` | login/register attempts per IP per window |
+| API | `AUTH_PEPPER` | **production** | random per process outside production | secret key (32+ chars) for hashing password-reset codes |
+| API | `MESSAGE_DELIVERY` | no | `dev-outbox` (`none` in production) | where invitation links and reset codes go; `dev-outbox` is refused in production |
+| API | `PUBLIC_WEB_URL` | no | first `CORS_ORIGINS` entry | website origin used in invitation links |
+| API | `INVITE_TTL_HOURS` / `RESET_CODE_TTL_MINUTES` | no | `168` / `10` | invitation and reset-code lifetimes |
 | API | `LOG_LEVEL` | no | `info` (`error` in tests) | `error` \| `warn` \| `info` \| `debug` |
 | API | `LOG_FORMAT` | no | `json` | `json` \| `pretty` |
 | API | `SEED_ADMIN_PHONE` / `SEED_ADMIN_PASSWORD` | no | — | demo society admin created by `pnpm db:seed` |
 | API | `SEED_GUARD_PHONE` / `SEED_GUARD_PASSWORD` | no | — | demo security guard created by `pnpm db:seed` |
+| API | `SEED_PLATFORM_ADMIN_PHONE` / `SEED_PLATFORM_ADMIN_PASSWORD` | no | — | demo platform administrator (creates societies, invites their first admin; no society data access) |
 | Web | `API_URL` | no | `http://localhost:4100` | API origin (no path); `/api/v1/*` is proxied to it |
 | Web | `LOG_LEVEL` / `LOG_FORMAT` | no | `info` / `json` | server-side web logs |
 | Mobile | `EXPO_PUBLIC_API_URL` | no | simulator: `http://localhost:4100`, emulator: `http://10.0.2.2:4100` | API origin baked into the build; must be HTTPS in production |
@@ -92,7 +97,7 @@ createdb krevia_e2e_test       # Playwright tests (reset on every run)
 pnpm db:migrate                # prisma migrate deploy → krevia_dev
 ```
 
-* Migrations live in `apps/api/prisma/migrations/` (`init`, `guard_role`). Never edit an applied migration; add a new one with `pnpm --filter @krevia/api prisma:migrate:dev --name <change>` against the dev database.
+* Migrations live in `apps/api/prisma/migrations/` (`init`, `guard_role`, `sprint2_secure_accounts`, `sprint3_resident_directory`). Rollback for Sprint 2: [docs/sprint-2/migrations.md](docs/sprint-2/migrations.md); Sprint 3: `apps/api/prisma/rollback/20261026090000_sprint3_resident_directory.down.sql`. Never edit an applied migration; add a new one with `pnpm --filter @krevia/api prisma:migrate:dev --name <change>` against the dev database.
 * **Test isolation.** `pnpm test:api` drops and recreates the schema of the database in `apps/api/.env.test`, then applies all migrations, so every run starts from a clean database. Its safety rails:
   * The test URL is read from `.env.test`, overriding any `DATABASE_URL` exported in your shell.
   * The database name must end in `_test`.
@@ -107,7 +112,9 @@ pnpm db:migrate                # prisma migrate deploy → krevia_dev
 pnpm db:seed     # idempotent; refuses to run when NODE_ENV=production
 ```
 
-Creates six **fictional** societies (e.g. "Green Valley Residency, Pune"). When their variables are set, it also creates a demo **society admin** and a demo **security guard** for Green Valley Residency. A password left empty skips that account.
+Creates six **fictional** societies (e.g. "Green Valley Residency, Pune"). When their variables are set, it also creates a demo **society admin** and a demo **security guard** for Green Valley Residency, and a demo **platform administrator**. A password left empty skips that account.
+
+**Invitations and reset codes in development.** No SMS provider is configured. With `MESSAGE_DELIVERY=dev-outbox` (the default outside production) the API keeps the messages it would send in memory; read them with `curl 'http://localhost:4100/api/v1/dev/outbox?to=%2B919876543210'`. Admins also see each invitation link once on the Invitations page, to share themselves.
 
 ## 7. Start the API and website
 
@@ -267,7 +274,10 @@ cd apps/mobile && pnpm android
 ## 17. Implemented vs. deferred
 
 **Implemented:**
-* Accounts and sessions (mobile number + password).
+* Accounts and sessions (mobile number + password, Argon2id), sign-out everywhere, password reset by one-time code (Sprint 2).
+* Invitations, memberships (active / suspended / revoked), units and resident assignment, multiple societies with an active-society selection, resident management pages and an audit log for admins (Sprint 2).
+* Central permission policy and tenant isolation on every society endpoint (Sprint 2).
+* Buildings, floors and an archival-aware unit directory; a resident and household directory with emergency contacts and vehicles; CSV import with template, validation preview, one-transaction confirm, counts, idempotent retries and a formula-safe error report; a resident household view on web and mobile (Sprint 3).
 * Society search.
 * Membership requests and status.
 * Society-admin approvals (web and mobile).
@@ -275,8 +285,8 @@ cd apps/mobile && pnpm android
 * Resident, Admin and Guard dashboards and menus, with a view switcher.
 * Health and readiness endpoints, structured logging, smoke test and CI workflow.
 
-**Deferred (menus show "Coming soon"):** OTP/SMS verification and password reset, visitors and QR gate entry, deliveries, staff and vehicle entry, payments, amenities, complaints, notices, events, directory, buy & sell, documents, polls, reports, and role assignment UI. There is also no public deployment; the test environment is localhost.
+**Deferred (menus show "Coming soon"):** SMS delivery (no provider; see the dev outbox above), phone-number verification at registration, visitors and QR gate entry, deliveries, staff and vehicle entry, payments, amenities, complaints, notices, events, the public business directory, buy & sell, documents, polls, reports, and role assignment UI. There is also no public deployment; the test environment is localhost.
 
-Roles: every account is a Resident. A `SocietyRole` grants `ADMIN` (`/admin`) or `GUARD` (`/guard`) for one society, and `/home` sends each user to their primary role's dashboard. Menus come from `packages/shared/src/navigation.ts`, following `design/reference/Krevia Multi-Role Community App Showcase.png`.
+Roles: a `Membership` grants `RESIDENT`, `ADMIN` (`/admin`) or `GUARD` (`/guard`) in one society; only `ACTIVE` memberships grant permissions, defined once in `packages/shared/src/permissions.ts`. `/home` sends each user to their primary role's dashboard. Menus come from `packages/shared/src/navigation.ts`, following `design/reference/Krevia Multi-Role Community App Showcase.png`.
 
 Brand: the official "K" house mark (`design/krevia-mark.png`, white variant for dark backgrounds) is used for the app icon, splash and favicon. Colour tokens are in `packages/shared/src/brand.ts`.

@@ -14,6 +14,8 @@ export function hrefFor(item: NavItem): Href {
       return '/settings';
     case 'requests':
       return '/requests';
+    case 'household':
+      return '/household';
     default:
       return { pathname: '/module/[key]', params: { key: item.key } };
   }

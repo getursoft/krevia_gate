@@ -20,6 +20,8 @@ function activityText(r: MembershipRequestDto): string {
       return `Your request for ${r.society.name} was not approved.${r.reviewNote ? ` Note: ${r.reviewNote}` : ''}`;
     case 'CANCELLED':
       return `You withdrew your request for ${r.society.name}.`;
+    case 'REVOKED':
+      return `Your membership of ${r.society.name} was revoked by the society.`;
   }
 }
 

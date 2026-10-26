@@ -21,6 +21,7 @@ export default function AppLayout() {
       <Stack.Screen name="join/[societyId]" options={{ title: 'Apartment details' }} />
       <Stack.Screen name="join/review" options={{ title: 'Review request' }} />
       <Stack.Screen name="society" options={{ title: 'My Society' }} />
+      <Stack.Screen name="household" options={{ title: 'My Household' }} />
       <Stack.Screen name="profile" options={{ title: 'My Profile' }} />
       <Stack.Screen name="settings" options={{ title: 'Settings' }} />
       <Stack.Screen name="requests" options={{ title: 'Resident Approvals' }} />

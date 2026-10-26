@@ -9,6 +9,7 @@ import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { SESSION_COOKIE } from '../config';
 import { Errors } from '../common/errors';
+import { requestStore } from '../common/request-context.middleware';
 import { SessionService, type SessionWithUser } from './session.service';
 
 export const IS_PUBLIC = 'isPublic';
@@ -43,6 +44,8 @@ export class AuthGuard implements CanActivate {
     const session = token ? await this.sessions.resolve(token) : null;
     if (!session) throw Errors.unauthenticated();
     req.auth = session;
+    const store = requestStore.getStore();
+    if (store) store.userId = session.userId;
     return true;
   }
 }

@@ -46,6 +46,7 @@ export function LoginForm() {
         <h1 id="login-title" style={{ fontSize: '1.8rem' }}>Welcome back</h1>
         <p className="muted">Sign in to {BRAND.name} with your mobile number.</p>
       </div>
+      {params.get('reset') === '1' && !formError && <FormAlert tone="success" message="Password changed. Sign in with your new password." />}
       <FormAlert message={formError} />
       <Field
         label="Mobile number"
@@ -71,11 +72,12 @@ export function LoginForm() {
       <button className="btn btn-primary btn-block" type="submit" disabled={submitting}>
         {submitting ? 'Signing in…' : 'Sign in'}
       </button>
-      <p className="muted" style={{ textAlign: 'center' }}>
-        New to {BRAND.name}? <Link href="/register">Create an account</Link>
+      <p style={{ textAlign: 'center', margin: 0 }}>
+        <Link href="/forgot-password">Forgot password?</Link>
       </p>
-      <p className="subtle" style={{ textAlign: 'center' }}>
-        Forgot your password? Password reset by OTP is not yet available — contact your society administrator.
+      <p className="muted" style={{ textAlign: 'center' }}>
+        New to {BRAND.name}?{' '}
+        <Link href={params.get('next') ? `/register?next=${encodeURIComponent(safeNext(params.get('next')))}` : '/register'}>Create an account</Link>
       </p>
     </form>
   );

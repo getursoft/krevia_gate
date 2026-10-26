@@ -6,3 +6,4 @@ export * from './icons';
 export * from './redact';
 export * from './navigation';
 export * from './illustrations';
+export * from './permissions';

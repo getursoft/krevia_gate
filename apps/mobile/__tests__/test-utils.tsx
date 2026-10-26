@@ -18,6 +18,7 @@ export const user: UserDto = {
   adminSocietyIds: [],
   guardSocietyIds: [],
   societyRoles: [],
+  memberships: [],
   createdAt: '2026-10-01T00:00:00.000Z',
 };
 

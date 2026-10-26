@@ -150,6 +150,7 @@ const BADGE: Record<MembershipStatus, { bg: string; fg: string }> = {
   APPROVED: { bg: colors.successSoft, fg: colors.success },
   REJECTED: { bg: colors.dangerSoft, fg: colors.danger },
   CANCELLED: { bg: '#EEF1EF', fg: colors.inkMuted },
+  REVOKED: { bg: '#EEF1EF', fg: colors.inkMuted },
 };
 
 export function StatusBadge({ status }: { status: MembershipStatus }) {
